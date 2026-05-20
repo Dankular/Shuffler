@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Shuffler</title>
+</head>
+<body>
+    <div id="ShufflerPlayerPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-select,emby-button">
+        <div data-role="content">
+            <div class="content-primary">
+                <h1 style="display:flex;align-items:center;gap:0.5em">
+                    <span class="material-icons" style="font-size:1.4em">shuffle</span>
+                    Shuffler
+                </h1>
+                <p class="fieldDescription">Shuffle your library while skipping files that won't play.</p>
+
+                <div style="display:flex;flex-wrap:wrap;gap:1em;align-items:flex-end;margin-bottom:1.5em">
+                    <div class="selectContainer" style="min-width:220px;flex:1">
+                        <label class="selectLabel" for="ShufflerLibrary">Library</label>
+                        <select is="emby-select" id="ShufflerLibrary" class="emby-select-withcolor emby-select">
+                            <option value="">All Libraries</option>
+                        </select>
+                    </div>
+                    <div class="inputContainer" style="min-width:100px">
+                        <label class="inputLabel inputLabelUnfocused" for="ShufflerLimit">Queue Size</label>
+                        <input is="emby-input" id="ShufflerLimit" type="number" value="200" min="10" max="1000" style="width:100px" />
+                    </div>
+                    <button is="emby-button" id="ShufflerStart" class="raised emby-button" style="align-self:flex-end">
+                        <span class="material-icons">play_arrow</span>
+                        <span>Shuffle &amp; Play</span>
+                    </button>
+                </div>
+
+                <div id="ShufflerStatus" style="display:none;padding:1em;background:rgba(255,255,255,0.05);border-radius:4px;margin-bottom:1em">
+                    <p id="ShufflerStatusText" style="margin:0"></p>
+                </div>
+
+                <div id="ShufflerQueue" style="display:none">
+                    <h3>Current Queue (<span id="ShufflerQueueCount">0</span> items)</h3>
+                    <p class="fieldDescription">If an item fails to play, click "Skip &amp; Blacklist" to exclude it permanently from future shuffles.</p>
+                    <div id="ShufflerQueueList" style="max-height:400px;overflow-y:auto"></div>
+                </div>
+            </div>
+        </div>
+
+        <script type="text/javascript">
+            var ShufflerPlayer = {
+                pluginUniqueId: '3d2bb4be-1e6a-4c7a-9a3f-2e5d8f1c0b9a',
+                queue: [],
+                autoSkip: true
+            };
+
+            function setStatus(msg) {
+                var el = document.querySelector('#ShufflerStatus');
+                el.style.display = '';
+                document.querySelector('#ShufflerStatusText').textContent = msg;
+            }
+
+            function renderQueue(items) {
+                var list = document.querySelector('#ShufflerQueueList');
+                list.innerHTML = '';
+                document.querySelector('#ShufflerQueueCount').textContent = items.length;
+                document.querySelector('#ShufflerQueue').style.display = items.length ? '' : 'none';
+
+                items.forEach(function(item, idx) {
+                    var row = document.createElement('div');
+                    row.style.cssText = 'display:flex;align-items:center;gap:0.75em;padding:0.35em 0;border-bottom:1px solid rgba(255,255,255,0.08)';
+
+                    var num = document.createElement('span');
+                    num.textContent = (idx + 1) + '.';
+                    num.style.cssText = 'color:rgba(255,255,255,0.4);min-width:2em;text-align:right;font-size:0.9em';
+
+                    var name = document.createElement('span');
+                    name.style.flex = '1';
+                    name.textContent = item.SeriesName
+                        ? item.SeriesName + ' — ' + item.Name
+                        : (item.Name + (item.ProductionYear ? ' (' + item.ProductionYear + ')' : ''));
+
+                    var skipBtn = document.createElement('button');
+                    skipBtn.setAttribute('is', 'emby-button');
+                    skipBtn.className = 'emby-button';
+                    skipBtn.style.fontSize = '0.8em';
+                    skipBtn.textContent = 'Skip & Blacklist';
+                    skipBtn.addEventListener('click', (function(itemId, rowEl) {
+                        return function() {
+                            ApiClient.ajax({ url: ApiClient.getUrl('Shuffler/Items/' + itemId + '/Skip'), type: 'POST' }).then(function() {
+                                rowEl.style.opacity = '0.3';
+                                rowEl.querySelector('button').disabled = true;
+                                ShufflerPlayer.queue = ShufflerPlayer.queue.filter(function(i) { return i.Id !== itemId; });
+                                document.querySelector('#ShufflerQueueCount').textContent = ShufflerPlayer.queue.length;
+                            });
+                        };
+                    })(item.Id, row));
+
+                    row.appendChild(num);
+                    row.appendChild(name);
+                    row.appendChild(skipBtn);
+                    list.appendChild(row);
+                });
+            }
+
+            function startShuffle() {
+                var libraryId = document.querySelector('#ShufflerLibrary').value;
+                var limit = parseInt(document.querySelector('#ShufflerLimit').value, 10) || 200;
+                var userId = ApiClient.getCurrentUserId();
+
+                setStatus('Loading shuffled queue...');
+                document.querySelector('#ShufflerStart').disabled = true;
+
+                var url = ApiClient.getUrl('Shuffler/Items', {
+                    userId: userId,
+                    limit: limit
+                });
+                if (libraryId) {
+                    url = ApiClient.getUrl('Shuffler/Items', {
+                        userId: userId,
+                        parentId: libraryId,
+                        limit: limit
+                    });
+                }
+
+                ApiClient.ajax({ url: url, type: 'GET' }).then(function(items) {
+                    document.querySelector('#ShufflerStart').disabled = false;
+
+                    if (!items || items.length === 0) {
+                        setStatus('No playable items found.');
+                        return;
+                    }
+
+                    ShufflerPlayer.queue = items;
+                    setStatus('Loaded ' + items.length + ' items. Starting playback...');
+                    renderQueue(items);
+
+                    require(['playbackManager'], function(playbackManager) {
+                        playbackManager.play({
+                            items: items,
+                            startIndex: 0,
+                            serverId: ApiClient.serverId()
+                        });
+
+                        if (ShufflerPlayer.autoSkip) {
+                            require(['events'], function(Events) {
+                                Events.off(playbackManager, 'playbackerror', ShufflerPlayer._errorHandler);
+                                ShufflerPlayer._errorHandler = function(e, player, state) {
+                                    var item = state && state.item;
+                                    if (!item) return;
+                                    setStatus('Playback error on "' + item.Name + '". Auto-skipping and blacklisting...');
+                                    ApiClient.ajax({ url: ApiClient.getUrl('Shuffler/Items/' + item.Id + '/Skip'), type: 'POST' });
+                                    ShufflerPlayer.queue = ShufflerPlayer.queue.filter(function(i) { return i.Id !== item.Id; });
+                                    document.querySelector('#ShufflerQueueCount').textContent = ShufflerPlayer.queue.length;
+                                    playbackManager.nextTrack();
+                                };
+                                Events.on(playbackManager, 'playbackerror', ShufflerPlayer._errorHandler);
+                            });
+                        }
+                    });
+                }).catch(function(err) {
+                    document.querySelector('#ShufflerStart').disabled = false;
+                    setStatus('Error loading items: ' + (err.message || err));
+                });
+            }
+
+            document.querySelector('#ShufflerPlayerPage').addEventListener('pageshow', function() {
+                ApiClient.getPluginConfiguration(ShufflerPlayer.pluginUniqueId).then(function(config) {
+                    ShufflerPlayer.autoSkip = config.AutoSkipOnError;
+                });
+
+                ApiClient.getItems(ApiClient.getCurrentUserId(), {
+                    Recursive: false,
+                    IncludeItemTypes: 'CollectionFolder',
+                    SortBy: 'SortName'
+                }).then(function(result) {
+                    var select = document.querySelector('#ShufflerLibrary');
+                    (result.Items || []).forEach(function(lib) {
+                        var opt = document.createElement('option');
+                        opt.value = lib.Id;
+                        opt.textContent = lib.Name;
+                        select.appendChild(opt);
+                    });
+                });
+            });
+
+            document.querySelector('#ShufflerStart').addEventListener('click', startShuffle);
+        </script>
+    </div>
+</body>
+</html>

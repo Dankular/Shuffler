@@ -1,0 +1,12 @@
+[
+  {
+    "Name": "Shuffler",
+    "Description": "Error-resilient shuffle playback for Jellyfin",
+    "Overview": "Replaces Jellyfin's built-in shuffle with a plugin that gracefully skips media files that fail to play due to bad encoding or other errors. Skipped items are permanently blacklisted so they never block your queue again.",
+    "Owner": "daKhosa",
+    "Category": "General",
+    "Guid": "3d2bb4be-1e6a-4c7a-9a3f-2e5d8f1c0b9a",
+    "ImageUrl": "",
+    "Versions": []
+  }
+]

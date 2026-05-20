@@ -1,18 +1,88 @@
-name: '🚀 Publish Plugin'
+name: '🚀 Release Plugin'
 
 on:
   release:
     types:
-      - released
-  workflow_dispatch:
+      - published
 
 jobs:
-  call:
-    uses: jellyfin/jellyfin-meta-plugins/.github/workflows/publish.yaml@master
-    with:
-      version: ${{ github.event.release.tag_name }}
-      is-unstable: ${{ github.event.release.prerelease }}
-    secrets:
-      deploy-host: ${{ secrets.DEPLOY_HOST }}
-      deploy-user: ${{ secrets.DEPLOY_USER }}
-      deploy-key: ${{ secrets.DEPLOY_KEY }}
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Build
+        run: dotnet build Jellyfin.Plugin.Shuffler.sln -c Release
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          zip -j dist/Jellyfin.Plugin.Shuffler_${{ steps.version.outputs.version }}.zip \
+            Jellyfin.Plugin.Shuffler/bin/Release/net9.0/Jellyfin.Plugin.Shuffler.dll
+
+      - name: Compute MD5 checksum
+        id: checksum
+        run: echo "md5=$(md5sum dist/Jellyfin.Plugin.Shuffler_${{ steps.version.outputs.version }}.zip | awk '{print $1}')" >> $GITHUB_OUTPUT
+
+      - name: Update repository.json
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          CHECKSUM: ${{ steps.checksum.outputs.md5 }}
+          TAG: ${{ github.ref_name }}
+          CHANGELOG: ${{ github.event.release.body }}
+        run: |
+          python3 - <<'EOF'
+          import json, datetime, os
+
+          with open('repository.json', 'r') as f:
+              repo = json.load(f)
+
+          version   = os.environ['VERSION']
+          checksum  = os.environ['CHECKSUM']
+          tag       = os.environ['TAG']
+          repo_slug = os.environ['GITHUB_REPOSITORY']
+          timestamp = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+          source_url = f"https://github.com/{repo_slug}/releases/download/{tag}/Jellyfin.Plugin.Shuffler_{version}.zip"
+
+          entry = {
+              "Version": version,
+              "VersionNumber": version,
+              "Changelog": os.environ.get('CHANGELOG', 'See release notes.'),
+              "TargetAbi": "10.9.0.0",
+              "SourceUrl": source_url,
+              "Checksum": checksum,
+              "Timestamp": timestamp
+          }
+
+          repo[0]['Versions'] = [entry] + [v for v in repo[0].get('Versions', []) if v['Version'] != version]
+
+          with open('repository.json', 'w') as f:
+              json.dump(repo, f, indent=2)
+          EOF
+
+      - name: Commit repository.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add repository.json
+          git commit -m "chore: update repository.json for ${{ github.ref_name }}"
+          git push origin HEAD:master
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Jellyfin.Plugin.Shuffler_${{ steps.version.outputs.version }}.zip

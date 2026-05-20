@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Shuffler</title>
+</head>
+<body>
+    <div id="ShufflerConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-button,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="ShufflerConfigForm">
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="AutoSkipOnError" name="AutoSkipOnError" type="checkbox" is="emby-checkbox" />
+                            <span>Auto-skip on playback error</span>
+                        </label>
+                        <div class="fieldDescription">Automatically add items to the skip list when they fail to play.</div>
+                    </div>
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>Save</span>
+                        </button>
+                    </div>
+                </form>
+
+                <div style="margin-top:2em;">
+                    <h2>Skip List</h2>
+                    <p class="fieldDescription">Items below are permanently excluded from shuffle. Remove them if you've fixed the file.</p>
+                    <div id="ShufflerSkipList"></div>
+                    <p id="ShufflerSkipListEmpty" style="display:none">No items skipped.</p>
+                </div>
+            </div>
+        </div>
+
+        <script type="text/javascript">
+            var ShufflerConfig = {
+                pluginUniqueId: '3d2bb4be-1e6a-4c7a-9a3f-2e5d8f1c0b9a'
+            };
+
+            function loadSkipList() {
+                ApiClient.ajax({ url: ApiClient.getUrl('Shuffler/SkipList'), type: 'GET' }).then(function(ids) {
+                    var container = document.querySelector('#ShufflerSkipList');
+                    var empty = document.querySelector('#ShufflerSkipListEmpty');
+                    container.innerHTML = '';
+
+                    if (!ids || ids.length === 0) {
+                        empty.style.display = '';
+                        return;
+                    }
+                    empty.style.display = 'none';
+
+                    ids.forEach(function(id) {
+                        ApiClient.getItem(ApiClient.getCurrentUserId(), id).then(function(item) {
+                            var row = document.createElement('div');
+                            row.style.cssText = 'display:flex;align-items:center;gap:1em;padding:0.4em 0;border-bottom:1px solid rgba(255,255,255,0.1)';
+                            row.innerHTML = '<span style="flex:1">' + (item.Name || id) + (item.ProductionYear ? ' (' + item.ProductionYear + ')' : '') + '</span>';
+
+                            var btn = document.createElement('button');
+                            btn.setAttribute('is', 'emby-button');
+                            btn.className = 'emby-button';
+                            btn.textContent = 'Remove';
+                            btn.addEventListener('click', function() {
+                                ApiClient.ajax({ url: ApiClient.getUrl('Shuffler/Items/' + id + '/Skip'), type: 'DELETE' }).then(function() {
+                                    loadSkipList();
+                                });
+                            });
+
+                            row.appendChild(btn);
+                            container.appendChild(row);
+                        }).catch(function() {
+                            var row = document.createElement('div');
+                            row.textContent = id + ' (item not found)';
+                            container.appendChild(row);
+                        });
+                    });
+                });
+            }
+
+            document.querySelector('#ShufflerConfigPage').addEventListener('pageshow', function() {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(ShufflerConfig.pluginUniqueId).then(function(config) {
+                    document.querySelector('#AutoSkipOnError').checked = config.AutoSkipOnError;
+                    Dashboard.hideLoadingMsg();
+                    loadSkipList();
+                });
+            });
+
+            document.querySelector('#ShufflerConfigForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(ShufflerConfig.pluginUniqueId).then(function(config) {
+                    config.AutoSkipOnError = document.querySelector('#AutoSkipOnError').checked;
+                    ApiClient.updatePluginConfiguration(ShufflerConfig.pluginUniqueId, config).then(function(result) {
+                        Dashboard.processPluginConfigurationUpdateResult(result);
+                    });
+                });
+            });
+        </script>
+    </div>
+</body>
+</html>

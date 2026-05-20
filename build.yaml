@@ -1,16 +1,17 @@
 ---
-name: "Template"
-guid: "eb5d7894-8eef-4b36-aa6f-5d124e828ce1"
+name: "Shuffler"
+guid: "3d2bb4be-1e6a-4c7a-9a3f-2e5d8f1c0b9a"
 version: "1.0.0.0"
 targetAbi: "10.9.0.0"
-framework: "net8.0"
-overview: "Short description about your plugin"
+framework: "net9.0"
+overview: "Error-resilient shuffle playback for Jellyfin"
 description: >
-  This is a longer description that can span more than one
-  line and include details about your plugin.
+  Replaces Jellyfin's built-in shuffle with a plugin that gracefully skips
+  media files that fail to play due to bad encoding or other errors.
+  Skipped items are permanently blacklisted so they never block your queue.
 category: "General"
-owner: "jellyfin"
+owner: "daKhosa"
 artifacts:
-- "Jellyfin.Plugin.Template.dll"
+- "Jellyfin.Plugin.Shuffler.dll"
 changelog: >
-  changelog
+  Initial release.
